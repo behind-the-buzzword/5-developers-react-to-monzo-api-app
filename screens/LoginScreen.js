@@ -1,16 +1,16 @@
 import React, { Component } from "react";
 import PropTypes from "prop-types";
-import { StyleSheet, Text, View, TouchableHighlight, Image, ActivityIndicator } from "react-native";
+import { StyleSheet, Text, View, TouchableHighlight, Image, Alert, ActivityIndicator } from "react-native";
+import { AuthSession } from "expo";
 import { bindActionCreators } from "redux";
 import { connect } from "react-redux";
+import uuidv4 from "uuid/v4";
 import { actions } from "../ducks/auth";
-
-// These values are imported from the .env file
-// import {
-//   CLIENT_ID,
-//   AUTHORIZATION_ENDPOINT_URL,
-//   TOKEN_ENDPOINT_URL,
-// } from "react-native-dotenv";
+import {
+  CLIENT_ID,
+  AUTHORIZATION_ENDPOINT_URL,
+  TOKEN_ENDPOINT_URL,
+} from "react-native-dotenv";
 
 export class LoginScreen extends Component {
 
@@ -19,15 +19,12 @@ export class LoginScreen extends Component {
   }
 
   static propTypes = {
+    busy: PropTypes.bool.isRequired,
     login: PropTypes.func.isRequired,
   }
 
-  state = {
-    busy: false,
-  }
-
   render() {
-    const { busy } = this.state;
+    const { busy } = this.props;
 
     return (
       <View style={styles.container}>
@@ -36,7 +33,7 @@ export class LoginScreen extends Component {
           {busy ? (
             <ActivityIndicator size="large" color="white" />
           ) : (
-            <TouchableHighlight style={styles.button} onPress={this.handleLogin}>
+            <TouchableHighlight style={styles.button} onPress={this._handleLogin}>
               <Text style={styles.buttonText}>Login with Monzo</Text>
             </TouchableHighlight>
           )}
@@ -46,35 +43,51 @@ export class LoginScreen extends Component {
     );
   }
 
-  handleLogin = () => {
-    // You will need to perform the following steps:
-    // 1. Get an authorization code
-    // 2. Exchange the authorization code for an access token
-    // 3. Call login with the response
+  _handleLogin = async () => {
+    try {
+      // Get an authorization code
+      const redirectUrl = AuthSession.getRedirectUrl();
+      const params = [
+        "response_type=code",
+        `client_id=${CLIENT_ID}`,
+        `redirect_uri=${redirectUrl}`,
+        `state=${uuidv4()}`,
+      ].join("&");
+      const result = await AuthSession.startAsync({
+        authUrl: `${AUTHORIZATION_ENDPOINT_URL}/?${params}`,
+      });
 
-    // Right now this is only a mock
-    this.setState({ busy: true });
+      if (result.type === "dismiss") return;
 
-    setTimeout(() => {
-      const user = {
-        access_token: "access_token",
-        client_id: "client_id",
-        expires_in: 21600,
-        refresh_token: "refresh_token",
-        token_type: "Bearer",
-        user_id: "user_id",
-      };
-
-      this.setState({ busy: false });
+      // Exchange the authorization code for an access token
+      const response = await fetch(TOKEN_ENDPOINT_URL, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          code: result.params.code,
+          redirect_uri: redirectUrl,
+        }),
+      });
+      const user = await response.json();
 
       // Login with the token
+      // NOTE: This will not close the web view, you will need to close this manually during development
       this.props.login(user);
-    }, 4000);
+    }
+    catch (err) {
+      console.error(err);
+      Alert.alert("Error", "Failed to sign in");
+    }
   }
 
 }
 
-const mapStateToProps = () => ({});
+const mapStateToProps = state => ({
+  busy: state.auth.busy,
+});
 const mapDispatchToProps = dispatch => bindActionCreators(actions, dispatch);
 
 export default connect(mapStateToProps, mapDispatchToProps)(LoginScreen);
